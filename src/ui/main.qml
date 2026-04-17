@@ -9,6 +9,39 @@ ApplicationWindow {
     visible: true
     title: qsTr("SaveSync (CST8002)")
 
+    // Unfinished and unused
+    function compare_timestamps() {
+        const TIME_SAME = 0
+        const TIME_OLDER = 1
+        const TIME_NEWER = 2
+        const NOT_YET_TRANSFERRED = 3
+
+        const listA = SaveFileModelA.get_last_modified()
+        const listB = SaveFileModelB.get_last_modified()
+
+        const lbUnique = {};
+
+
+        // TODO:
+        //  Get unique elements from either list, separate and turn 'NOT_YET_TRANSFERRED' (green?)
+        //  Get matching elements from either list
+        //  If X's key[value] > Y's key[value], set X to 'TIME_NEWER' (yellow?) and Y to 'TIME_OLDER' (red?)
+
+        // [UNFINISHED]
+        /*
+        for (const [key, value] of Object.entries(listA)) {
+            console.log(`${key}: ${value}`);
+            if (listB.hasOwnProperty(key)) {
+                if (listA[key] > listB[key]) {
+
+                } else if (listA[key] < listB[key]) {
+
+                }
+            }
+        }
+        */
+    }
+
     // Application menu bar (usually shows 'File', 'Edit', 'Help', et cetera)
     menuBar: MenuBar {
         Menu {
@@ -18,12 +51,6 @@ ApplicationWindow {
                 text: qsTr("&Configure save directories")
                 onTriggered: {
                     preferences.show()
-                }
-            }
-            Action {
-                text: qsTr("TEST")
-                onTriggered: {
-                    //SaveFileModel.test_func()
                 }
             }
         }
@@ -46,11 +73,13 @@ ApplicationWindow {
             id: saveGameDelegate
             Item {
                 id: saveGameItem
+
+                property color backgroundColour: "whitesmoke"
                 required property url fileUrl
                 // Qt expects model->view properties to be 'required', see below
                 /* https://doc.qt.io/qt-6/qtquick-modelviewsdata-modelview.html#models
                     https://doc.qt.io/qt-6/qml-codingconventions.html#required-properties */
-                property url iconUrl
+                required property url iconUrl
                 required property string title
                 required property string description
                 required property string lastModified
@@ -60,35 +89,46 @@ ApplicationWindow {
                 // Ensures the item (and therefore its coloured highlight) matches the width of its parent pane
                 width: ListView.view.width
 
-                GridLayout {
-                    columns: 2
-                    rows: 3
+                Rectangle {
+                    anchors.fill: parent
+                    color: backgroundColour
 
-                    // Icon (32x32, may be animated)
-                    Image {
-                        Layout.column: 0
-                        Layout.rowSpan: 3
-                    /*
-                        TODO: Does this need optimization?
-                        I believe I read that Qt re-creates delegates while scrolling,
-                        which'd mean this is continuously called in runtime, but I'm having trouble finding that again in the docs.
-                    */
-                    // Check if icon url was provided and is not empty. If it seems valid, load from it, or if not, load the placeholder image.
-                        source: (iconUrl && iconUrl.toString().length > 0) ? iconUrl : "../../res/placeholder_32.png"
-                    }
+                    GridLayout {
+                        columns: 2
+                        rows: 3
 
-                    Text {
-                        text: title
-                    }
+                        // Icon (32x32, may be animated)
+                        Image {
+                            Layout.column: 0
+                            Layout.rowSpan: 3
 
-                    Text {
-                        text: description
-                    }
+                            width: 32
+                            height: 32
+                            smooth: false
+                            mipmap: false
 
-                    Text {
-                        text: lastModified
-                        font.italic: true
-                        color: "grey"
+                        /*
+                            TODO: Does this need optimization?
+                            I believe I read that Qt re-creates delegates while scrolling,
+                            which'd mean this is continuously called in runtime, but I'm having trouble finding that again in the docs.
+                        */
+                        // Check if icon url was provided and is not empty. If it seems valid, load from it, or if not, load the placeholder image.
+                            source: (iconUrl && iconUrl.toString().length > 0) ? iconUrl : "../../res/placeholder_32.png"
+                        }
+
+                        Text {
+                            text: title
+                        }
+
+                        Text {
+                            text: description
+                        }
+
+                        Text {
+                            text: lastModified
+                            font.italic: true
+                            color: "grey"
+                        }
                     }
                 }
             }
@@ -108,16 +148,15 @@ ApplicationWindow {
             // TODO: Lists should be scrollable both vertically and horizontally, if needed.
             // TODO: Current behaviour has flickability (pulling), feels like a mobile interface. Don't want that.
             ListView {
+                id: listViewA
                 anchors.fill: parent
-                model: SaveFileModel
+                model: SaveFileModelA
                 delegate: saveGameDelegate
-
-                // TODO: Find out why highlight is animating it's width changes, and disable the animation
-                highlight: Rectangle { color: "lightsteelblue" }
-                focus: true
 
                 // Clips (cuts off) text if its length exceeds the parent width
                 clip: true
+
+                //onCountChanged: compare_timestamps()
             }
         }
 
@@ -131,12 +170,13 @@ ApplicationWindow {
             background: Rectangle {}
 
             ListView {
+                id: listViewB
                 anchors.fill: parent
-                // model: TODO (separate instance of SaveFileModel might be too bulky, can I declare new lists in SaveFileModel?)
+                model: SaveFileModelB
                 delegate: saveGameDelegate
-                // highlight: Rectangle { color: "lightsteelblue" }
-                highlight: highlight
                 clip: true
+
+                //onCountChanged: compare_timestamps()
             }
         }
 

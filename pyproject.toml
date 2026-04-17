@@ -3,7 +3,7 @@
 
 [project]
 name = "SaveSync (CST8002)"
-version = "0.5"
+version = "0.9"
 authors = [
     {name = "Tehgan Porter", email = "tehgan@proton.me"},
 ]

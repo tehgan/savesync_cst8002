@@ -2,26 +2,13 @@
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QSize
-from PySide6.QtGui import QGuiApplication, QPixmap
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
-from PySide6.QtQuick import QQuickImageProvider
 
 from helpers.url_helper import UrlHelper
 from model import SaveFileModel
-
-
-# https://doc.qt.io/qtforpython-6/PySide6/QtQuick/QQuickImageProvider.html
-class IconImageProvider(QQuickImageProvider):
-    def requestPixmap(self, id, size, requestedSize, /):
-        width = 32
-        height = 32
-        if size:
-            size = QSize(width, height)
-        pixmap = QPixmap(requestedSize.width() > 0 if requestedSize.width() else width,
-                         requestedSize.height() > 0 if requestedSize.height() else height)
-        # TODO: Get ID, fill w/ rgba or smth
-
+from icon_provider import IconProvider
+from icon_qquick_image_provider import IconImageProvider
 
 if __name__ == "__main__":
     app = QGuiApplication(sys.argv)
@@ -37,8 +24,13 @@ if __name__ == "__main__":
     engine.rootContext().setContextProperty("UrlHelper", url_helper)
 
     # Allow access to SaveFileModel from within Qml (data-getting from main.qml, repopulation call from Preferences.qml)
-    save_file_model = SaveFileModel()
-    engine.rootContext().setContextProperty("SaveFileModel", save_file_model)
+    icon_provider = IconProvider()
+    save_file_model_a = SaveFileModel(icon_provider)
+    save_file_model_b = SaveFileModel(icon_provider)
+    engine.rootContext().setContextProperty("SaveFileModelA", save_file_model_a)
+    engine.rootContext().setContextProperty("SaveFileModelB", save_file_model_b)
+
+    engine.addImageProvider("icons", IconImageProvider(icon_provider))
 
     qml_file = Path(__file__).resolve().parent / "ui" / "main.qml"
 

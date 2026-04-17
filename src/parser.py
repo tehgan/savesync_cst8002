@@ -1,23 +1,21 @@
 # This Python file uses the following encoding: utf-8
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 import re
-
-#from parser_icon import parse_icon
-
 from PySide6.QtCore import QDateTime, QLocale
+
+from icon_provider import IconProvider
 
 
 @dataclass
 class SaveFile:
     # Path converted to a string
     file_path: str
-    # TODO: Refactor to QImage or similar
-    icon: str
+    file_info: str
     title: str
     description: str
-    last_modified: str
+    epoch_last_modified: int
+    localized_last_modified: str
 
 
 @dataclass
@@ -36,7 +34,7 @@ def get_icon_slices(ic_fmt: bytes):
 
 
 # Currently parses only .gci (Nintendo GameCube) save files, but may be expanded upon and split up in the future
-def parse(raw_directory_path: str):
+def parse(raw_directory_path: str, icon_provider: IconProvider):
     valid_files = []
     # Check if directory path is valid
     directory_path = Path(raw_directory_path)
@@ -50,7 +48,9 @@ def parse(raw_directory_path: str):
         for file in file_paths:
             valid = True
 
-            # TODO: Might be good to optimize this a little, esp. the beginning; reading 4 lil bytes probably has a lot of overhead. Can they be read all at once, then accessed from a bytearray?
+            # TODO: Might be good to optimize this a little, esp. the beginning;
+            #  reading 4 lil bytes probably has a lot of overhead.
+            #  Can they be read all at once, then accessed from a bytearray?
             # .gci files don't have a "magic number" so I need to manually verify a few fields
             with open(file, 'rb') as f:
                 if not f.seekable():
@@ -106,8 +106,10 @@ def parse(raw_directory_path: str):
 
                 # If file is valid, get other metadata and add it to the list.
                 if valid:
-                    # Seek to 'date last modified' address (0x28) from current position
-                    f.seek(32, 1)
+                    # Get file info for use as icon dict key, strip excess padding, convert to a string
+                    b_file_info = f.read(32)
+                    b_file_info = b_file_info.rstrip(b'\x00')
+                    file_info = b_file_info.decode('cp1252')
                     # Seconds past 12/31/1999 11:59:59 PM
                     b_last_modified_offset = f.read(4)
                     # Convert binary byte string (from read()) to decimal.
@@ -116,7 +118,11 @@ def parse(raw_directory_path: str):
                     # Calculate datetime from seconds offset
                     base_datetime = QDateTime(1999, 12, 31, 23, 59, 59)
                     calculated_datetime = base_datetime.addSecs(last_modified_offset)
-                    last_modified = QLocale.system().toString(calculated_datetime, QLocale.FormatType.ShortFormat)
+                    epoch_last_modified = calculated_datetime.toSecsSinceEpoch()
+                    localized_last_modified = QLocale.system().toString(
+                        calculated_datetime,
+                        QLocale.FormatType.ShortFormat
+                    )
 
                     # Graphic (bnr/icon) address offset
                     # It seems this offset takes place after the info offset,
@@ -147,82 +153,42 @@ def parse(raw_directory_path: str):
                     # Game name (title), 32 bytes, ASCII
                     game_name = f.read(32)
                     # File info (description), 32 bytes, ASCII
-                    file_info = f.read(32)
-
-
-                    # TODO: Refactor; get offset, close file, pass offset + f.tell (position of first frame) to image parser
-                    #  Also decode name/info and append out of file
-                    # 01-GAFE-DobutsunomoriP_F_SAVE - NES Save data; no banner, static icon, x00
-                    # 01-GAFE-DobutsunomoriP_MURA - Town data; banner, static icon, x01
-                    # 51-GWME-Worms3DSave - Worms 3D; no banner, animated icon (4 frames), x00
-                    # AF-GNME-NAMCOMUSEUM - Namco Museum; banner, animated icon (2 frames), x01
+                    file_desc = f.read(32)
 
                     # Banner size + graphic_offset, which appears to be calculated to take place the info_offset
-                    seek_count = (graphic_offset - 64) + bnr_seek_count
-                    print("Estimated seek:", (f.tell() + seek_count))
-                    f.seek(seek_count, 1)
-                    print("Current position after seek:", f.tell())
+                    first_frame_address = f.tell() + bnr_seek_count + (graphic_offset - 64)
 
-                    #######################
-                    # ICON FORMAT / SPEED #
-                    #######################
-                    frame_info: list[FrameInfo] = list()
-                    frame_position = f.tell()
-                    uses_shared_palette = False
+            # File is now closed
 
-                    # None = 00, CI8_SHARED = 01 (1024b img + 512b palette at end of frame data),
-                    # RGB5A3 = 10 (2048b img), CI8_UNIQUE = 11 (1024b img + 512b palette directly afterward)
-                    icon_format_slices = get_icon_slices(icon_format)
-                    for fs in icon_format_slices:
-                        match fs:
-                            case '00':
-                                break
-                            case '01':
-                                frame_info.append(FrameInfo(frame_position, '01', ''))
-                                frame_position += 1024
-                                uses_shared_palette = True
-                            case '10':
-                                frame_info.append(FrameInfo(frame_position, '10', ''))
-                                frame_position += 2048
-                            case '11':
-                                frame_info.append(FrameInfo(frame_position, '11', ''))
-                                frame_position += 1536
+            # Strip padding from game_name and file_info byte strings
+            game_name = game_name.rstrip(b'\x00')
+            file_desc = file_desc.rstrip(b'\x00')
 
-                    # NO_ICON = 00, 4_FRAMES = 01, 8_FRAMES = 10, 12_FRAMES = 11
-                    icon_speed_slices = get_icon_slices(icon_speed)
-                    for i, ss in enumerate(icon_speed_slices):
-                        if i >= len(frame_info) or ss == '00':
-                            break
-                        elif ss in ('01', '10', '11'):
-                            frame_info[i].ic_speed = ss
+            """
+            It was very difficult to find information on memory card encoding,
+             but according to https://x.com/Extrems/status/1592569400577904640 ,
+            NA/Europe/Australia uses windows-1252 (extended ASCII), and eastern Asia uses Shift JIS.
+            TODO: Implement Shift JIS and test w/ Japanese save files
+            """
+            # Decode name and description byte strings
+            title = game_name.decode('cp1252')
+            description = file_desc.decode('cp1252')
 
-                    # TODO: Parse static CI8 ('00 01' format) and animated CI8 ('00 05'?)
-                    #icon = parse_icon(frame_info)
+            # Parse icon, add to icon_provider's internal dict
+            icon_provider.parse_icon(file, first_frame_address, icon_format, icon_speed, file_info)
 
-
-                    #######################
-                    # NAME & INFO PARSING #
-                    #######################
-                    # Strip padding from game_name and file_info byte strings
-                    game_name = game_name.rstrip(b'\x00')
-                    file_info = file_info.rstrip(b'\x00')
-
-                    """
-                    It was very difficult to find information on memory card encoding,
-                     but according to https://x.com/Extrems/status/1592569400577904640 ,
-                    NA/Europe/Australia uses windows-1252 (extended ASCII), and eastern Asia uses Shift JIS.
-                    TODO: Implement Shift JIS and test w/ Japanese save files
-                    """
-                    title = game_name.decode('cp1252')
-                    description = file_info.decode('cp1252')
-
-                    """
-                    TODO:
-                     1) Save files should be sorted if they aren't implicitly
-                     2) Returned icon URL is always blank as I don't have image parsing ready yet
-                    """
-                    sf = SaveFile(str(file), '', title, description, last_modified)
-                    valid_files.append(sf)
-            # File is now closed, but still in loop (so valid can still be checked)
+            """
+            TODO:
+             1) Save files should be sorted if they aren't implicitly
+            """
+            sf = SaveFile(
+                str(file),
+                file_info,
+                title,
+                description,
+                epoch_last_modified,
+                localized_last_modified
+            )
+            valid_files.append(sf)
 
     return valid_files
